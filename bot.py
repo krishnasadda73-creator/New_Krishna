@@ -6,51 +6,63 @@ import random
 from PIL import Image, ImageDraw
 import subprocess
 
+# API Config
+HF_TOKEN = os.getenv("HF_TOKEN")
+# Stable Diffusion XL - One of the best free models
+API_URL = "https://api-inference.huggingface.co/models/stabilityai/stable-diffusion-xl-base-1.0"
+headers = {"Authorization": f"Bearer {HF_TOKEN}"}
+
+def query_hf(prompt):
+    # Retry logic kyunki kabhi kabhi model 'Wake up' hone mein time leta hai
+    for i in range(3):
+        response = requests.post(API_URL, headers=headers, json={"inputs": prompt})
+        if response.status_code == 200:
+            return response.content
+        elif response.status_code == 503:
+            print("Model is sleeping, waiting 20s...")
+            time.sleep(20)
+        else:
+            print(f"HF Error: {response.status_code}")
+    return None
+
 def generate_content():
     try:
-        # 1. Generate Text (AI Script)
-        print("Step 1: Fetching Script...")
-        text_url = f"https://text.pollinations.ai/{urllib.parse.quote('Write 1-sentence prompt for Lord Krishna portrait | 10-word Hindi quote')}"
-        full_text = requests.get(text_url).text
-        image_prompt = full_text.split('|')[0].strip() if "|" in full_text else "Lord Krishna divine portrait"
-        quote = full_text.split('|')[1].strip() if "|" in full_text else "Jai Shree Krishna"
+        # 1. Text Script (Pollinations Text is fine for this)
+        print("Step 1: Fetching Quote...")
+        quote = "Jai Shree Krishna"
+        try:
+            text_url = f"https://text.pollinations.ai/{urllib.parse.quote('Write a beautiful 10-word Hindi quote of Lord Krishna')}"
+            quote = requests.get(text_url, timeout=10).text.strip()
+        except: pass
         print(f"Quote: {quote}")
 
-        # 2. Image Generation (Prodia API via Pollinations - Stable Route)
-        # Hum Prodia ka model specify karenge jo hamesha up rehta hai
-        print("Step 2: Generating Image via Prodia Engine...")
-        encoded_prompt = urllib.parse.quote(image_prompt)
-        # Seed change karne se har baar unique image aayegi
-        seed = random.randint(1, 99999)
+        # 2. Image Generation via Hugging Face
+        print("Step 2: Generating Image via Hugging Face...")
+        prompt = "Hyper-realistic cinematic portrait of Lord Krishna, divine lighting, 8k, highly detailed"
+        img_data = query_hf(prompt)
         
-        # Is baar hum model specify kar rahe hain: 'v1.5-pruned-emaonly' (Very Stable)
-        img_url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width=1080&height=1920&model=v1.5-pruned-emaonly&seed={seed}&nologo=true"
-        
-        # Retry with a bit of delay
-        response = requests.get(img_url, timeout=30)
-        
-        if response.status_code == 200 and len(response.content) > 20000:
+        if img_data:
             with open('raw_image.jpg', 'wb') as f:
-                f.write(response.content)
-            print("Image downloaded successfully!")
+                f.write(img_data)
+            print("Image downloaded from Hugging Face!")
         else:
-            print("Stable API also busy. Using fallback.jpg...")
+            print("HF Failed. Using fallback.jpg...")
             if os.path.exists('fallback.jpg'):
-                img = Image.open('fallback.jpg')
-                img.save('raw_image.jpg')
+                Image.open('fallback.jpg').convert("RGB").save('raw_image.jpg')
             else:
-                raise Exception("No image source available!")
+                Image.new('RGB', (1080, 1920), color=(30, 30, 30)).save('raw_image.jpg')
 
-        # 3. Processing (Pillow)
-        print("Step 3: Drawing Text...")
+        # 3. Drawing Text
         img = Image.open("raw_image.jpg").convert("RGB")
+        # HF images 1024x1024 hoti hain, hum ise reel size mein resize karenge
+        img = img.resize((1080, 1920), Image.LANCZOS)
         w, h = img.size
         draw = ImageDraw.Draw(img)
         draw.rectangle([0, h-450, w, h-50], fill=(0, 0, 0, 160))
         draw.text((w/2, h-250), quote, fill="white", anchor="mm")
         img.save("processed_image.jpg")
 
-        # 4. BGM & FFmpeg
+        # 4. Rendering Video
         bgm_folder = "BGM"
         selected_bgm = ""
         if os.path.exists(bgm_folder):
@@ -61,9 +73,9 @@ def generate_content():
         print("Step 4: FFmpeg Rendering...")
         cmd = f'ffmpeg -loop 1 -i processed_image.jpg '
         if selected_bgm:
-            cmd += f'-i "{selected_bgm}" -c:v libx264 -t 10 -pix_fmt yuv420p -vf "scale=1080:1920" -c:a aac -shortest '
+            cmd += f'-i "{selected_bgm}" -c:v libx264 -t 10 -pix_fmt yuv420p -c:a aac -shortest '
         else:
-            cmd += f'-c:v libx264 -t 10 -pix_fmt yuv420p -vf "scale=1080:1920" '
+            cmd += f'-c:v libx264 -t 10 -pix_fmt yuv420p '
         cmd += '-y final_reel.mp4'
         
         subprocess.run(cmd, shell=True, check=True)
