@@ -8,84 +8,69 @@ import subprocess
 
 def generate_content():
     try:
-        # 1. Assets Generation
-        print("Step 1: Generating Text...")
-        system_prompt = "Write a 1-sentence prompt for Lord Krishna image and a 10-word Hindi quote. Separate with |"
-        text_url = f"https://text.pollinations.ai/{urllib.parse.quote(system_prompt)}"
+        # 1. Generate Text (AI Script)
+        print("Step 1: Fetching Script...")
+        text_url = f"https://text.pollinations.ai/{urllib.parse.quote('Write 1-sentence prompt for Lord Krishna portrait | 10-word Hindi quote')}"
         full_text = requests.get(text_url).text
-        
-        image_prompt = full_text.split('|')[0].strip() if "|" in full_text else "Lord Krishna divine portrait cinematic"
+        image_prompt = full_text.split('|')[0].strip() if "|" in full_text else "Lord Krishna divine portrait"
         quote = full_text.split('|')[1].strip() if "|" in full_text else "Jai Shree Krishna"
         print(f"Quote: {quote}")
 
-        # 2. Robust Image Download
-        print("Step 2: Downloading Image (Waiting for AI)...")
+        # 2. Image Generation (Prodia API via Pollinations - Stable Route)
+        # Hum Prodia ka model specify karenge jo hamesha up rehta hai
+        print("Step 2: Generating Image via Prodia Engine...")
         encoded_prompt = urllib.parse.quote(image_prompt)
-        # Seed badalne se fresh image milti hai
-        img_url = f"https://pollinations.ai/p/{encoded_prompt}?width=1080&height=1920&model=flux&seed={random.randint(1, 99999)}"
+        # Seed change karne se har baar unique image aayegi
+        seed = random.randint(1, 99999)
         
-        max_retries = 5
-        image_downloaded = False
+        # Is baar hum model specify kar rahe hain: 'v1.5-pruned-emaonly' (Very Stable)
+        img_url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width=1080&height=1920&model=v1.5-pruned-emaonly&seed={seed}&nologo=true"
         
-        for i in range(max_retries):
-            print(f"Attempt {i+1} to download image...")
-            response = requests.get(img_url)
-            
-            # Check if file is valid (at least 20KB)
-            if response.status_code == 200 and len(response.content) > 20000:
-                with open('raw_image.jpg', 'wb') as f:
-                    f.write(response.content)
-                print(f"Image saved! Size: {len(response.content)} bytes")
-                image_downloaded = True
-                break
-            else:
-                print("Image not ready yet, waiting 10 seconds...")
-                time.sleep(10) # 10 second ka gap
+        # Retry with a bit of delay
+        response = requests.get(img_url, timeout=30)
         
-        if not image_downloaded:
-            print("Pollinations is slow. Using a stable fallback image...")
-            fallback_url = "https://pollinations.ai/p/lord%20krishna%20divine%20cinematic?width=1080&height=1920&seed=123"
+        if response.status_code == 200 and len(response.content) > 20000:
             with open('raw_image.jpg', 'wb') as f:
-                f.write(requests.get(fallback_url).content)
+                f.write(response.content)
+            print("Image downloaded successfully!")
+        else:
+            print("Stable API also busy. Using fallback.jpg...")
+            if os.path.exists('fallback.jpg'):
+                img = Image.open('fallback.jpg')
+                img.save('raw_image.jpg')
+            else:
+                raise Exception("No image source available!")
 
-        # 3. Drawing Text (Pillow)
-        print("Step 3: Processing Image...")
+        # 3. Processing (Pillow)
+        print("Step 3: Drawing Text...")
         img = Image.open("raw_image.jpg").convert("RGB")
-        draw = ImageDraw.Draw(img)
         w, h = img.size
-        # Bottom transparent overlay
-        overlay = Image.new('RGBA', img.size, (0,0,0,0))
-        d = ImageDraw.Draw(overlay)
-        d.rectangle([0, h-450, w, h-50], fill=(0, 0, 0, 160))
-        img = Image.alpha_composite(img.convert('RGBA'), overlay).convert('RGB')
-        
         draw = ImageDraw.Draw(img)
+        draw.rectangle([0, h-450, w, h-50], fill=(0, 0, 0, 160))
         draw.text((w/2, h-250), quote, fill="white", anchor="mm")
         img.save("processed_image.jpg")
 
-        # 4. BGM Selection
+        # 4. BGM & FFmpeg
         bgm_folder = "BGM"
         selected_bgm = ""
         if os.path.exists(bgm_folder):
             files = [f for f in os.listdir(bgm_folder) if f.endswith('.mp3')]
             if files:
                 selected_bgm = os.path.join(bgm_folder, random.choice(files))
-                print(f"BGM selected: {selected_bgm}")
 
-        # 5. FFmpeg
-        print("Step 5: Final Rendering...")
+        print("Step 4: FFmpeg Rendering...")
+        cmd = f'ffmpeg -loop 1 -i processed_image.jpg '
         if selected_bgm:
-            cmd = f'ffmpeg -loop 1 -i processed_image.jpg -i "{selected_bgm}" -c:v libx264 -t 10 -pix_fmt yuv420p -vf "scale=1080:1920" -c:a aac -shortest -y final_reel.mp4'
+            cmd += f'-i "{selected_bgm}" -c:v libx264 -t 10 -pix_fmt yuv420p -vf "scale=1080:1920" -c:a aac -shortest '
         else:
-            cmd = f'ffmpeg -loop 1 -i processed_image.jpg -c:v libx264 -t 10 -pix_fmt yuv420p -vf "scale=1080:1920" -y final_reel.mp4'
+            cmd += f'-c:v libx264 -t 10 -pix_fmt yuv420p -vf "scale=1080:1920" '
+        cmd += '-y final_reel.mp4'
         
         subprocess.run(cmd, shell=True, check=True)
-        print("MISSION ACCOMPLISHED: final_reel.mp4 created!")
+        print("REEL GENERATED SUCCESSFULLY!")
 
     except Exception as e:
-        print(f"Final Attempt Failed: {e}")
-        # Build empty files to prevent git error
-        open('final_reel.mp4', 'a').close()
+        print(f"Error: {e}")
 
 if __name__ == "__main__":
     generate_content()
