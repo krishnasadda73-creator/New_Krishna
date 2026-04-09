@@ -1,7 +1,6 @@
 import os
 import requests
 from google import genai
-from google.genai import types
 
 # API Key setup
 api_key = os.getenv("GEMINI_API_KEY")
@@ -9,57 +8,42 @@ client = genai.Client(api_key=api_key)
 
 def generate_content():
     try:
-        # 1. Gemini se Image Prompt aur Quote lena
-        # Hum ek hi call mein dono mangwa lenge time bachane ke liye
-        combined_query = "Generate a detailed 1-sentence English prompt for an AI to create a cinematic 9:16 portrait of Lord Krishna. Also, provide a deep 10-word Hindi quote about life."
-        response = client.models.generate_content(model="gemini-2.0-flash", contents=combined_query)
+        # 1. Gemini se Prompt aur Quote lena
+        print("Fetching prompt from Gemini...")
+        response = client.models.generate_content(
+            model="gemini-2.0-flash", 
+            contents="Write a 1-sentence English prompt for an AI image of Lord Krishna. Also, a 10-word Hindi quote."
+        )
         
         full_text = response.text
-        # Simple split logic (prompt English mein hoga, quote Hindi mein)
-        image_prompt = full_text.split('.')[0].strip() 
-        quote = full_text.split('.')[-1].strip()
+        # Safety split: Agar Gemini galti se point na de toh poora text prompt ban jaye
+        image_prompt = full_text.split('\n')[0].strip()
+        quote = full_text.strip()
+        
+        print(f"Generated Prompt: {image_prompt}")
 
-        print(f"Prompt: {image_prompt}")
-        print(f"Quote: {quote}")
-
-        # 2. IMAGE GENERATION (Priority Logic)
-        image_saved = False
-
-        # PRIORITY 1: Gemini (Imagen)
-        try:
-            print("Trying Priority 1: Gemini Imagen...")
-            # Note: Gemini Imagen 3 use karne ke liye model name 'imagen-3' hota hai
-            img_response = client.models.generate_images(
-                model='imagen-3',
-                prompt=image_prompt,
-                config=types.GenerateImagesConfig(
-                    number_of_images=1,
-                    aspect_ratio="9:16"
-                )
-            )
-            # Agar image mil gayi toh save karo
-            if img_response.generated_images:
-                img_response.generated_images[0].image.save("krishna_image.jpg")
-                print("Success: Image generated via Gemini!")
-                image_saved = True
-        except Exception as e:
-            print(f"Gemini Image failed or not available: {e}")
-
-        # PRIORITY 2: Pollinations (Fallback)
-        if not image_saved:
-            print("Switching to Priority 2: Pollinations.ai...")
-            image_url = f"https://pollinations.ai/p/{image_prompt.replace(' ', '%20')}?width=720&height=1280&model=flux"
-            img_data = requests.get(image_url).content
+        # 2. Image Generation (Direct Pollinations for stability)
+        print("Generating image via Pollinations...")
+        # URL ko clean karna zaroori hai
+        clean_prompt = "".join(x for x in image_prompt if x.isalnum() or x in " -_")
+        image_url = f"https://pollinations.ai/p/{clean_prompt.replace(' ', '%20')}?width=720&height=1280&seed=42&model=flux"
+        
+        img_data = requests.get(image_url).content
+        
+        # Check karna ki data mila ya nahi
+        if len(img_data) > 1000: # Minimum size check (1kb)
             with open('krishna_image.jpg', 'wb') as handler:
                 handler.write(img_data)
-            print("Success: Image generated via Pollinations!")
+            print("Successfully saved krishna_image.jpg")
+        else:
+            print("Error: Image data too small, might be a failed request.")
 
-        # 3. Save Quote for next step
+        # 3. Save Quote
         with open('quote.txt', 'w', encoding='utf-8') as f:
             f.write(quote)
-
+            
     except Exception as e:
-        print(f"Main Error: {e}")
+        print(f"Bhai error aaya hai: {e}")
 
 if __name__ == "__main__":
     generate_content()
