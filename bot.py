@@ -1,7 +1,6 @@
 import os
-import requests
-import time
 from google import genai
+from google.genai import types
 
 # API Key setup
 api_key = os.getenv("GEMINI_API_KEY")
@@ -9,55 +8,52 @@ client = genai.Client(api_key=api_key)
 
 def generate_content():
     try:
-        # 1. Gemini se Prompt aur Quote lena
-        print("Step 1: Fetching prompt from Gemini...")
-        response = client.models.generate_content(
+        # 1. Prompt & Quote Generation
+        print("Step 1: Asking Gemini for a Divine Prompt...")
+        prompt_request = client.models.generate_content(
             model="gemini-2.0-flash", 
-            contents="Write a 1-sentence English prompt for an AI to create a cinematic vertical 9:16 portrait of Lord Krishna. Also, write a 10-word Hindi quote about life."
+            contents="Write a highly detailed 1-sentence prompt for Imagen 3 to create a 9:16 cinematic portrait of Lord Krishna. Also, give a 10-word Hindi quote."
         )
         
-        full_text = response.text
-        # Safety split: Pehli line prompt, baaki quote
+        full_text = prompt_request.text
         lines = full_text.strip().split('\n')
         image_prompt = lines[0].strip()
         quote = " ".join(lines[1:]).strip() if len(lines) > 1 else "Jai Shree Krishna"
         
         print(f"Prompt: {image_prompt}")
 
-        # 2. Save Quote first (Safety)
+        # 2. Asli Image Generation (Gemini Imagen 3)
+        print("Step 2: Generating Image via Gemini Imagen 3...")
+        
+        # 'imagen-3' is the official model for image generation
+        response = client.models.generate_images(
+            model='imagen-3',
+            prompt=image_prompt,
+            config=types.GenerateImagesConfig(
+                number_of_images=1,
+                aspect_ratio="9:16",
+                output_mime_type="image/jpeg"
+            )
+        )
+
+        if response.generated_images:
+            # Image ko save karna
+            with open("krishna_image.jpg", "wb") as f:
+                f.write(response.generated_images[0].image.get_bytes())
+            print(f"SUCCESS: Gemini generated a {len(response.generated_images[0].image.get_bytes())} bytes image.")
+        else:
+            print("FAILED: Gemini returned no image.")
+            exit(1)
+
+        # 3. Save Quote
         with open('quote.txt', 'w', encoding='utf-8') as f:
             f.write(quote)
-        print("Step 2: Quote saved.")
-
-        # 3. Image Generation with Pollinations (Retry Logic)
-        print("Step 3: Generating image via Pollinations...")
-        
-        # URL Cleaning: Sirf zaroori characters rakhenge
-        clean_prompt = "".join(x for x in image_prompt if x.isalnum() or x in " ")
-        encoded_prompt = clean_prompt.replace(' ', '%20')
-        
-        # Seed change karne se har baar nayi image milti hai
-        seed = int(time.time()) 
-        image_url = f"https://pollinations.ai/p/{encoded_prompt}?width=720&height=1280&seed={seed}&model=flux"
-        
-        print(f"Requesting URL: {image_url}")
-        
-        response = requests.get(image_url, timeout=30)
-        
-        if response.status_code == 200 and len(response.content) > 5000:
-            with open('krishna_image.jpg', 'wb') as handler:
-                handler.write(response.content)
-            print("SUCCESS: krishna_image.jpg saved successfully!")
-        else:
-            print(f"FAILED: Status {response.status_code}, Size {len(response.content)}")
-            # Agar fail ho jaye toh ek blank file bana do taaki Git error na de
-            open('krishna_image.jpg', 'a').close() 
 
     except Exception as e:
-        print(f"SYSTEM ERROR: {e}")
-        # Error aane par bhi empty files banao taaki workflow na tute
-        open('krishna_image.jpg', 'a').close()
-        open('quote.txt', 'a').close()
+        print(f"CRITICAL ERROR: {e}")
+        # Agar yahan error aaya, toh iska matlab hai Gemini API key 
+        # mein Imagen 3 enabled nahi hai ya quota issue hai.
+        exit(1)
 
 if __name__ == "__main__":
     generate_content()
